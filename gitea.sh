@@ -2,7 +2,7 @@
 # Install the latest Gitea tea CLI on Ubuntu using prebuilt binaries
 set -euo pipefail
 
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="$HOME/.local/bin"
 TEA_BINARY="tea"
 
 get_architecture() {
@@ -46,9 +46,9 @@ main() {
   chmod +x "$tmp_file"
 
   echo "Installing to ${INSTALL_DIR}/${TEA_BINARY}..."
-  sudo install -m 755 "$tmp_file" "${INSTALL_DIR}/${TEA_BINARY}"
+  install -m 755 "$tmp_file" "${INSTALL_DIR}/${TEA_BINARY}"
 
   echo "tea $(tea --version) installed successfully"
 }
 
-main "$@"
+main "${@+"$@"}"
