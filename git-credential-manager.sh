@@ -1,59 +1,51 @@
 #!/usr/bin/env bash
-# Install the latest git-credential-manager release into ~/.local/bin
+# Install the latest git-credential-manager from GitHub releases into ~/.local/bin
 set -euo pipefail
 
-INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_DIR="$HOME/.local/bin"
 REPO="git-ecosystem/git-credential-manager"
 
-get_architecture() {
-  local arch
-  arch=$(uname -m)
-  case "$arch" in
-  x86_64) echo "amd64" ;;
+if [[ "${1:-}" == "--system" ]]; then
+  INSTALL_DIR="/usr/local/bin"
+  shift
+fi
+
+get_arch() {
+  case "$(uname -m)" in
+  x86_64) echo "x64" ;;
   aarch64) echo "arm64" ;;
-  armv7l) echo "arm" ;;
   *)
-    echo "Unsupported architecture: $arch" >&2
+    echo "Unsupported architecture: $(uname -m)" >&2
     exit 1
     ;;
   esac
 }
 
+TMP_DIR=""
+cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+
 main() {
-  local download_url tmp_dir api_response
+  local arch version download_url
+
+  arch=$(get_arch)
 
   echo "Fetching latest release info..."
-  api_response=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
-  # Extract tarball URL for linux + architecture (handles both _ and - separators)
-  download_url=$(echo "$api_response" |
-    grep -o '"browser_download_url": *"[^"]*"' |
-    grep -i "linux" |
-    grep '\.tar\.gz"' |
-    grep -v 'symbols' |
-    grep -v 'arm64' |
-    head -1 |
-    sed 's/.*"\(http[^"]*\)".*/\1/')
+  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
+    grep -oP '"tag_name":\s*"\K[^"]+')
+  echo "Latest version: $version"
 
+  download_url="https://github.com/${REPO}/releases/download/${version}/gcm-linux-${arch}-${version#v}.tar.gz"
   echo "Downloading from: $download_url"
 
-  tmp_dir=$(mktemp -d)
-  trap 'rm -rf "$tmp_dir"' EXIT
-
-  curl -fsSL -o "$tmp_dir/gcm.tar.gz" "$download_url"
+  TMP_DIR=$(mktemp -d)
+  curl -fsSL -o "$TMP_DIR/gcm.tar.gz" "$download_url"
 
   mkdir -p "$INSTALL_DIR"
-  tar -xzf "$tmp_dir/gcm.tar.gz" -C "$INSTALL_DIR"
+  tar -xzf "$TMP_DIR/gcm.tar.gz" -C "$INSTALL_DIR"
 
-  echo "Installed to $INSTALL_DIR"
-
-  if [[ -x "$INSTALL_DIR/git-credential-manager" ]]; then
-    "$INSTALL_DIR/git-credential-manager" --version
-    echo ""
-    echo "To configure git, run:"
-    echo "  git-credential-manager configure"
-    echo ""
-    echo "Ensure $INSTALL_DIR is in your PATH"
-  fi
+  echo "git-credential-manager installed to ${INSTALL_DIR}"
+  "$INSTALL_DIR/git-credential-manager" --version
 }
 
-main "${@+"$@"}"
+main "$@"

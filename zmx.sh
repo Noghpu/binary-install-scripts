@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-# Install zmx (https://github.com/neurosnap/zmx) into ~/.local/bin
+# Install the latest zmx (https://github.com/neurosnap/zmx) into ~/.local/bin
 set -euo pipefail
 
-VERSION="0.4.1"
 INSTALL_DIR="$HOME/.local/bin"
+REPO="neurosnap/zmx"
+
+if [[ "${1:-}" == "--system" ]]; then
+  INSTALL_DIR="/usr/local/bin"
+  shift
+fi
 
 get_os() {
   case "$(uname -s)" in
@@ -32,23 +37,29 @@ cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 main() {
-  local os arch download_url
+  local os arch version download_url
 
   os=$(get_os)
   arch=$(get_arch)
-  download_url="https://zmx.sh/a/zmx-${VERSION}-${os}-${arch}.tar.gz"
 
-  echo "Downloading zmx ${VERSION} for ${os}/${arch}..."
+  echo "Fetching latest release info..."
+  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/tags" |
+    grep -oP '"name":\s*"\Kv[0-9][^"]+' | head -1)
+  version="${version#v}"
+  echo "Latest version: $version"
+
+  download_url="https://zmx.sh/a/zmx-${version}-${os}-${arch}.tar.gz"
+  echo "Downloading from: $download_url"
 
   TMP_DIR=$(mktemp -d)
-
   curl -fsSL -o "$TMP_DIR/zmx.tar.gz" "$download_url"
   tar xzf "$TMP_DIR/zmx.tar.gz" -C "$TMP_DIR"
 
   mkdir -p "$INSTALL_DIR"
   install -m 755 "$TMP_DIR/zmx" "$INSTALL_DIR/zmx"
 
-  echo "zmx ${VERSION} installed to ${INSTALL_DIR}/zmx"
+  echo "zmx ${version} installed to ${INSTALL_DIR}/zmx"
+  "$INSTALL_DIR/zmx" --version
 }
 
 main "$@"
