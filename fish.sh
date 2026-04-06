@@ -5,10 +5,24 @@ set -euo pipefail
 INSTALL_DIR="$HOME/.local/bin"
 REPO="fish-shell/fish-shell"
 
-if [[ "${1:-}" == "--system" ]]; then
-  INSTALL_DIR="/usr/local/bin"
-  shift
-fi
+VERSION=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --system)
+    INSTALL_DIR="/usr/local/bin"
+    shift
+    ;;
+  --version)
+    VERSION="$2"
+    shift 2
+    ;;
+  *)
+    echo "Unknown option: $1" >&2
+    exit 1
+    ;;
+  esac
+done
 
 get_arch() {
   case "$(uname -m)" in
@@ -30,16 +44,25 @@ main() {
 
   arch=$(get_arch)
 
-  echo "Fetching latest release info..."
-  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
-    grep -oP '"tag_name":\s*"\K[^"]+')
-  echo "Latest version: $version"
+  if [[ -n "$VERSION" ]]; then
+    version="${VERSION#v}"
+    echo "Using specified version: $version"
+  else
+    echo "Fetching latest release info..."
+    version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
+      grep -oP '"tag_name":\s*"\K[^"]+')
+    echo "Latest version: $version"
+  fi
 
   download_url="https://github.com/${REPO}/releases/download/${version}/fish-${version}-linux-${arch}.tar.xz"
   echo "Downloading from: $download_url"
 
   TMP_DIR=$(mktemp -d)
-  curl -fsSL -o "$TMP_DIR/fish.tar.xz" "$download_url"
+  if ! curl -fsSL -o "$TMP_DIR/fish.tar.xz" "$download_url"; then
+    echo "Error: failed to download version '${version}'." >&2
+    echo "Expected format: '4.0.0' (no 'v' prefix). See: https://github.com/${REPO}/releases" >&2
+    exit 1
+  fi
   tar xf "$TMP_DIR/fish.tar.xz" -C "$TMP_DIR"
 
   mkdir -p "$INSTALL_DIR"
@@ -49,4 +72,4 @@ main() {
   "$INSTALL_DIR/fish" --version
 }
 
-main "$@"
+main
