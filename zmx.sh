@@ -4,6 +4,7 @@ set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/bin"
 REPO="neurosnap/zmx"
+SUDO=""
 
 VERSION=""
 
@@ -11,6 +12,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
   --system)
     INSTALL_DIR="/usr/local/bin"
+    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
     shift
     ;;
   --version)
@@ -78,8 +80,8 @@ main() {
   fi
   tar xzf "$TMP_DIR/zmx.tar.gz" -C "$TMP_DIR"
 
-  mkdir -p "$INSTALL_DIR"
-  install -m 755 "$TMP_DIR/zmx" "$INSTALL_DIR/zmx"
+  $SUDO mkdir -p "$INSTALL_DIR"
+  $SUDO install -m 755 "$TMP_DIR/zmx" "$INSTALL_DIR/zmx"
 
   echo "zmx ${version} installed to ${INSTALL_DIR}/zmx"
   "$INSTALL_DIR/zmx" --version

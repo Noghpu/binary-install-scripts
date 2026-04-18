@@ -4,6 +4,7 @@ set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/bin"
 REPO="git-ecosystem/git-credential-manager"
+SUDO=""
 
 VERSION=""
 
@@ -11,6 +12,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
   --system)
     INSTALL_DIR="/usr/local/bin"
+    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
     shift
     ;;
   --version)
@@ -64,8 +66,8 @@ main() {
     exit 1
   fi
 
-  mkdir -p "$INSTALL_DIR"
-  tar -xzf "$TMP_DIR/gcm.tar.gz" -C "$INSTALL_DIR"
+  $SUDO mkdir -p "$INSTALL_DIR"
+  $SUDO tar -xzf "$TMP_DIR/gcm.tar.gz" -C "$INSTALL_DIR"
 
   echo "git-credential-manager installed to ${INSTALL_DIR}"
   "$INSTALL_DIR/git-credential-manager" --version

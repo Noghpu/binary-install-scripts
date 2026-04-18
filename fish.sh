@@ -4,6 +4,7 @@ set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/bin"
 REPO="fish-shell/fish-shell"
+SUDO=""
 
 VERSION=""
 
@@ -11,6 +12,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
   --system)
     INSTALL_DIR="/usr/local/bin"
+    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
     shift
     ;;
   --version)
@@ -65,8 +67,8 @@ main() {
   fi
   tar xf "$TMP_DIR/fish.tar.xz" -C "$TMP_DIR"
 
-  mkdir -p "$INSTALL_DIR"
-  install -m 755 "$TMP_DIR/fish" "$INSTALL_DIR/fish"
+  $SUDO mkdir -p "$INSTALL_DIR"
+  $SUDO install -m 755 "$TMP_DIR/fish" "$INSTALL_DIR/fish"
 
   echo "fish ${version} installed to ${INSTALL_DIR}/fish"
   "$INSTALL_DIR/fish" --version

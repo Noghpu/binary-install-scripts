@@ -4,6 +4,7 @@ set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/bin"
 REPO="dandavison/delta"
+SUDO=""
 
 VERSION=""
 
@@ -11,6 +12,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
   --system)
     INSTALL_DIR="/usr/local/bin"
+    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
     shift
     ;;
   --version)
@@ -65,8 +67,8 @@ main() {
   fi
   tar xzf "$TMP_DIR/delta.tar.gz" -C "$TMP_DIR" --strip-components=1
 
-  mkdir -p "$INSTALL_DIR"
-  install -m 755 "$TMP_DIR/delta" "$INSTALL_DIR/delta"
+  $SUDO mkdir -p "$INSTALL_DIR"
+  $SUDO install -m 755 "$TMP_DIR/delta" "$INSTALL_DIR/delta"
 
   echo "delta ${version} installed to ${INSTALL_DIR}/delta"
   "$INSTALL_DIR/delta" --version

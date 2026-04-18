@@ -4,6 +4,7 @@ set -euo pipefail
 
 INSTALL_DIR="$HOME/.local"
 REPO="neovim/neovim"
+SUDO=""
 
 TAG="nightly"
 
@@ -11,6 +12,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
   --system)
     INSTALL_DIR="/usr/local"
+    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
     shift
     ;;
   --version)
@@ -59,10 +61,10 @@ main() {
   fi
   tar xzf "$TMP_DIR/nvim.tar.gz" -C "$TMP_DIR" --strip-components=1
 
-  mkdir -p "$INSTALL_DIR"
-  cp -rf "$TMP_DIR/bin/"* "$INSTALL_DIR/bin/"
-  cp -rf "$TMP_DIR/lib/"* "$INSTALL_DIR/lib/"
-  cp -rf "$TMP_DIR/share/"* "$INSTALL_DIR/share/"
+  $SUDO mkdir -p "$INSTALL_DIR"
+  $SUDO cp -rf "$TMP_DIR/bin/"* "$INSTALL_DIR/bin/"
+  $SUDO cp -rf "$TMP_DIR/lib/"* "$INSTALL_DIR/lib/"
+  $SUDO cp -rf "$TMP_DIR/share/"* "$INSTALL_DIR/share/"
 
   echo "neovim (${TAG}) installed to ${INSTALL_DIR}"
   "$INSTALL_DIR/bin/nvim" --version | head -1

@@ -3,6 +3,7 @@
 set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/bin"
+SUDO=""
 
 VERSION=""
 
@@ -10,6 +11,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
   --system)
     INSTALL_DIR="/usr/local/bin"
+    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
     shift
     ;;
   --version)
@@ -66,8 +68,8 @@ main() {
     exit 1
   fi
 
-  mkdir -p "$INSTALL_DIR"
-  install -m 755 "$TMP_DIR/tea" "$INSTALL_DIR/tea"
+  $SUDO mkdir -p "$INSTALL_DIR"
+  $SUDO install -m 755 "$TMP_DIR/tea" "$INSTALL_DIR/tea"
 
   echo "tea ${version} installed to ${INSTALL_DIR}/tea"
   "$INSTALL_DIR/tea" --version
