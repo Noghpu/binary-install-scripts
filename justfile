@@ -12,11 +12,16 @@ install tool *args:
 # Install every tool (pass --system to install to /usr/local/bin)
 install-all *args:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -uo pipefail
+    failed=()
     for script in *.sh; do
         echo "==> $script"
-        ./"$script" {{args}}
+        ./"$script" {{args}} || failed+=("$script")
     done
+    if (( ${#failed[@]} )); then
+        echo "Failed: ${failed[*]}" >&2
+        exit 1
+    fi
 
 # Re-install tools currently present in ~/.local/bin
 update:
@@ -29,15 +34,20 @@ update-system:
 [private]
 _update prefix *flags:
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -uo pipefail
+    failed=()
     for script in *.sh; do
         bin=$(grep -oP '\$INSTALL_DIR/\K[^"]+' "$script" | tail -1)
         bin="${bin##*/}"
         if [[ -x "{{prefix}}/bin/$bin" ]]; then
             echo "==> $script"
-            ./"$script" {{flags}}
+            ./"$script" {{flags}} || failed+=("$script")
         fi
     done
+    if (( ${#failed[@]} )); then
+        echo "Failed: ${failed[*]}" >&2
+        exit 1
+    fi
 
 # Remove tool binaries from ~/.local/bin (does not clean up support files)
 uninstall:
@@ -59,6 +69,6 @@ _uninstall prefix sudo:
             echo "==> rm $target"
             {{sudo}} rm -f "$target"
             note=$(grep -oP '^# uninstall-note: \K.*' "$script" || true)
-            [[ -n "$note" ]] && echo "    warning: $note" >&2
+            if [[ -n "$note" ]]; then echo "    warning: $note" >&2; fi
         fi
     done

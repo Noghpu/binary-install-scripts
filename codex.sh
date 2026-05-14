@@ -28,8 +28,8 @@ done
 
 get_arch() {
   case "$(uname -m)" in
-  x86_64) echo "x86_64-unknown-linux-gnu" ;;
-  aarch64) echo "aarch64-unknown-linux-gnu" ;;
+  x86_64) echo "x86_64-unknown-linux-musl" ;;
+  aarch64) echo "aarch64-unknown-linux-musl" ;;
   *)
     echo "Unsupported architecture: $(uname -m)" >&2
     exit 1
