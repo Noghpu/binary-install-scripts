@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Install the nightly build of Neovim from GitHub releases into ~/.local
+# uninstall-note: also installs lib/nvim and share/nvim under the prefix
 set -euo pipefail
 
 INSTALL_DIR="$HOME/.local"
