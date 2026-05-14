@@ -72,6 +72,18 @@ Linux-only scripts hardcode `linux` in the URL. Add `get_os()` (`Linux→linux`,
 - **tar already laid out as install tree** → `tar -xzf ... -C "$INSTALL_DIR"` directly. Ref: `git-credential-manager.sh`.
 - **Multi-dir install** (`bin/` + `lib/` + `share/`) → change `INSTALL_DIR` default to `$HOME/.local` and `cp -rf "$TMP_DIR"/{bin,lib,share} "$INSTALL_DIR"/`. Smoke-test with `"$INSTALL_DIR/bin/<tool>" --version | head -1`. Ref: `neovim.sh`.
 
+## Uninstall hint
+
+`just uninstall` removes only `<prefix>/bin/<binary>`. If your script also writes
+outside that path (multi-dir installs, completions, man pages, etc.), add a
+header comment so the recipe can warn the user about stragglers:
+
+```bash
+# uninstall-note: also installs lib/<tool> and share/<tool> under the prefix
+```
+
+Ref: `neovim.sh`.
+
 ## Checklist for a new script
 
 1. Gather upstream facts: repo, release source, tag style, asset filename template, archive shape, supported arches.
