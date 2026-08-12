@@ -1,74 +1,59 @@
 #!/usr/bin/env bash
-# Install the nightly build of Neovim from GitHub releases into ~/.local
-# uninstall-note: also installs lib/nvim and share/nvim under the prefix
+# Install Neovim from GitHub releases.
+# uninstall-note: also installs lib/nvim and share/nvim below the selected prefix
 set -euo pipefail
 
-INSTALL_DIR="$HOME/.local"
-REPO="neovim/neovim"
-SUDO=""
-
-TAG="nightly"
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-  --system)
-    INSTALL_DIR="/usr/local"
-    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
-    shift
-    ;;
-  --version)
-    case "$2" in
-    nightly | stable) TAG="$2" ;;
-    *) TAG="v${2#v}" ;;
-    esac
-    shift 2
-    ;;
-  *)
-    echo "Unknown option: $1" >&2
-    exit 1
-    ;;
-  esac
-done
+BIS_TOOL="neovim"
+BIS_DESCRIPTION="Install Neovim stable, nightly, or an exact verified GitHub release."
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+bis_parse_args "$@"
 
 get_arch() {
   case "$(uname -m)" in
-  x86_64) echo "x86_64" ;;
-  aarch64) echo "arm64" ;;
-  *)
-    echo "Unsupported architecture: $(uname -m)" >&2
-    exit 1
-    ;;
+  x86_64) echo x86_64 ;;
+  aarch64 | arm64) echo arm64 ;;
+  *) bis_die "unsupported architecture: $(uname -m)" ;;
   esac
 }
 
-TMP_DIR=""
-cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
-trap cleanup EXIT
-
 main() {
-  local arch download_url
-
+  local repo="neovim/neovim" arch requested tag version asset archive binary tree path relative mode
+  [[ "$(uname -s)" == Linux ]] || bis_die "only Linux is supported"
+  bis_require curl tar install
   arch=$(get_arch)
-
-  echo "Using tag: $TAG"
-  download_url="https://github.com/${REPO}/releases/download/${TAG}/nvim-linux-${arch}.tar.gz"
-  echo "Downloading from: $download_url"
-
-  TMP_DIR=$(mktemp -d)
-  if ! curl -fsSL -o "$TMP_DIR/nvim.tar.gz" "$download_url"; then
-    echo "Error: failed to download tag '${TAG}'." >&2
-    echo "Expected format: 'v0.10.0', 'nightly', or 'stable'. See: https://github.com/${REPO}/releases" >&2
-    exit 1
+  requested=${BIS_VERSION:-nightly}
+  case "$requested" in
+  nightly | stable)
+    tag=$requested
+    version=$requested
+    ;;
+  *)
+    version=${requested#v}
+    tag="v${version}"
+    ;;
+  esac
+  binary="$BIS_PREFIX/bin/nvim"
+  if [[ "$version" != nightly && "$version" != stable ]]; then
+    bis_skip_if_installed "$binary" "$version" --version && return 0
   fi
-  tar xzf "$TMP_DIR/nvim.tar.gz" -C "$TMP_DIR" --strip-components=1
 
-  $SUDO mkdir -p "$INSTALL_DIR"
-  $SUDO cp -rf "$TMP_DIR/bin/"* "$INSTALL_DIR/bin/"
-  $SUDO cp -rf "$TMP_DIR/lib/"* "$INSTALL_DIR/lib/"
-  $SUDO cp -rf "$TMP_DIR/share/"* "$INSTALL_DIR/share/"
-
-  echo "neovim (${TAG}) installed to ${INSTALL_DIR}"
-  "$INSTALL_DIR/bin/nvim" --version | head -1
+  bis_make_temp_dir
+  asset="nvim-linux-${arch}.tar.gz"
+  archive="$BIS_TMP_DIR/$asset"
+  bis_download_github_asset "$repo" "$tag" "$asset" "$archive"
+  ((BIS_DRY_RUN)) && return 0
+  bis_safe_extract_tar "$archive" "$BIS_TMP_DIR/extracted"
+  tree=$(find "$BIS_TMP_DIR/extracted" -mindepth 1 -maxdepth 1 -type d -print -quit)
+  [[ -n "$tree" ]] || bis_die "Neovim archive did not contain an install tree"
+  while IFS= read -r -d '' path; do
+    relative=${path#"$tree/"}
+    [[ "$relative" != "$path" ]] || continue
+    mode=644
+    [[ -x "$path" ]] && mode=755
+    bis_install_file "$path" "$BIS_PREFIX/$relative" "$mode"
+  done < <(find "$tree" -type f -print0)
+  "$binary" --version | head -n 1
+  bis_mark_installed "$version"
 }
 
 main

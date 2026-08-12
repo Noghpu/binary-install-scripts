@@ -1,90 +1,52 @@
 #!/usr/bin/env bash
-# Install the latest zmx (https://github.com/neurosnap/zmx) into ~/.local/bin
+# Install zmx from GitHub releases.
 set -euo pipefail
 
-INSTALL_DIR="$HOME/.local/bin"
-REPO="neurosnap/zmx"
-SUDO=""
-
-VERSION=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-  --system)
-    INSTALL_DIR="/usr/local/bin"
-    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
-    shift
-    ;;
-  --version)
-    VERSION="$2"
-    shift 2
-    ;;
-  *)
-    echo "Unknown option: $1" >&2
-    exit 1
-    ;;
-  esac
-done
+BIS_TOOL="zmx"
+BIS_DESCRIPTION="Install zmx from a verified GitHub release on Linux or macOS."
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+bis_parse_args "$@"
 
 get_os() {
   case "$(uname -s)" in
-  Linux) echo "linux" ;;
-  Darwin) echo "macos" ;;
-  *)
-    echo "Unsupported OS: $(uname -s)" >&2
-    exit 1
-    ;;
+  Linux) echo linux ;;
+  Darwin) echo macos ;;
+  *) bis_die "unsupported OS: $(uname -s)" ;;
   esac
 }
 
 get_arch() {
   case "$(uname -m)" in
-  x86_64) echo "x86_64" ;;
-  aarch64 | arm64) echo "aarch64" ;;
-  *)
-    echo "Unsupported architecture: $(uname -m)" >&2
-    exit 1
-    ;;
+  x86_64) echo x86_64 ;;
+  aarch64 | arm64) echo aarch64 ;;
+  *) bis_die "unsupported architecture: $(uname -m)" ;;
   esac
 }
 
-TMP_DIR=""
-cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
-trap cleanup EXIT
-
 main() {
-  local os arch version download_url
-
+  local repo="neurosnap/zmx" os arch version tag asset archive binary
+  bis_require curl tar install
   os=$(get_os)
   arch=$(get_arch)
-
-  if [[ -n "$VERSION" ]]; then
-    version="${VERSION#v}"
-    echo "Using specified version: $version"
+  if [[ -n "$BIS_VERSION" ]]; then
+    version=${BIS_VERSION#v}
+    tag="v${version}"
   else
-    echo "Fetching latest release info..."
-    version=$(curl -fsSL "https://api.github.com/repos/${REPO}/tags" |
-      grep -oP '"name":\s*"\Kv[0-9][^"]+' | head -1)
-    version="${version#v}"
-    echo "Latest version: $version"
+    tag=$(bis_github_latest_tag "$repo")
+    version=${tag#v}
   fi
+  binary="$BIS_PREFIX/bin/zmx"
+  bis_skip_if_installed "$binary" "$version" --version && return 0
 
-  download_url="https://zmx.sh/a/zmx-${version}-${os}-${arch}.tar.gz"
-  echo "Downloading from: $download_url"
-
-  TMP_DIR=$(mktemp -d)
-  if ! curl -fsSL -o "$TMP_DIR/zmx.tar.gz" "$download_url"; then
-    echo "Error: failed to download version '${version}'." >&2
-    echo "Expected format: 'v0.3.0' or '0.3.0' (v prefix is stripped automatically). See: https://github.com/${REPO}/releases" >&2
-    exit 1
-  fi
-  tar xzf "$TMP_DIR/zmx.tar.gz" -C "$TMP_DIR"
-
-  $SUDO mkdir -p "$INSTALL_DIR"
-  $SUDO install -m 755 "$TMP_DIR/zmx" "$INSTALL_DIR/zmx"
-
-  echo "zmx ${version} installed to ${INSTALL_DIR}/zmx"
-  "$INSTALL_DIR/zmx" --version
+  bis_make_temp_dir
+  asset="zmx-${version}-${os}-${arch}.tar.gz"
+  archive="$BIS_TMP_DIR/$asset"
+  bis_download_github_asset "$repo" "$tag" "$asset" "$archive"
+  ((BIS_DRY_RUN)) && return 0
+  bis_safe_extract_tar "$archive" "$BIS_TMP_DIR/extracted"
+  bis_install_file "$BIS_TMP_DIR/extracted/zmx" "$binary"
+  "$binary" --version
+  bis_mark_installed "$version"
 }
 
 main

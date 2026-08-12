@@ -1,102 +1,54 @@
-# binary-install-scripts — design guide
+# binary-install-scripts — contributor guide
 
-Each script installs one upstream tool's prebuilt binary into `~/.local/bin`
-(default) or `/usr/local/bin` (`--system`). When `--system` is used, the script
-self-elevates via `sudo` for the install step only (download/extract stay
-unprivileged). No package manager, no build step, no checksums, no idempotency.
+This repository installs upstream prebuilt tools below `~/.local` by default.
+Every public installer is a thin `*.sh` entry point backed by `lib/common.sh`.
 
-**To write a new script: copy the closest existing one and adapt per this guide.**
+## Required behavior
 
-## Canonical shape (all scripts)
+- Preserve the common CLI: `--version`, `--prefix`, `--system`, `--force`,
+  `--dry-run`, and `--help`.
+- Download and extract as the invoking user. Elevate only final writes when
+  `--system` is selected.
+- Use `bis_download_github_asset` for GitHub releases. It validates the asset
+  name and verifies GitHub's SHA-256 digest when one is published.
+- For other hosts, verify a published SHA-256 checksum when available.
+- Extract tar archives with `bis_safe_extract_tar`.
+- Smoke-test the installed binary and then call `bis_mark_installed`.
+- Support x86-64 and ARM64 whenever upstream publishes both.
+- Keep project-specific release naming and archive layout in its entry point;
+  put only genuinely shared mechanics in `lib/common.sh`.
 
-1. `#!/usr/bin/env bash`; line 2 = one-line purpose comment; `set -euo pipefail`.
-2. Top-level constants: `INSTALL_DIR="$HOME/.local/bin"`, `REPO="owner/repo"`, `SUDO=""`, `VERSION=""`.
-3. Flag parser (hand-rolled `while`/`case`): only `--system` and `--version <V>`. Unknown → `exit 1`. No `--help`, no short flags, no `getopts`. `--system` sets `INSTALL_DIR="/usr/local/bin"` and, if `EUID != 0`, sets `SUDO="sudo"` and runs `sudo -v` to prime the credential cache before any download.
-4. `get_arch()` — `case "$(uname -m)"` mapping `x86_64` and `aarch64` to the tokens upstream uses; default branch prints `Unsupported architecture: $(uname -m)` to stderr and exits 1.
-5. Cleanup prelude (must appear before `main`):
-   ```bash
-   TMP_DIR=""
-   cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
-   trap cleanup EXIT
-   ```
-6. `main()` with `local arch version download_url`:
-   - resolve `version` (see §Version source)
-   - build `download_url`
-   - `TMP_DIR=$(mktemp -d)`; download with `curl -fsSL -o ... "$download_url"` wrapped in `if ! curl ...; then` that prints the expected version format and the releases URL on failure
-   - extract (see §Extraction)
-   - `$SUDO mkdir -p "$INSTALL_DIR"` then `$SUDO install -m 755 ...` (prefix all write-to-install-dir commands with `$SUDO`; leave download/extract unprivileged)
-   - final two lines: `echo "<tool> $version installed to $INSTALL_DIR/<tool>"` and `"$INSTALL_DIR/<tool>" --version` as a smoke test
-7. Last line of file: `main`.
+## Adding an installer
 
-Plain `echo` for info, `echo ... >&2` for errors. No colors, no log levels.
+1. Copy the closest existing entry point.
+2. Set `BIS_TOOL` and `BIS_DESCRIPTION` before sourcing `lib/common.sh`.
+3. Call `bis_parse_args "$@"` immediately after sourcing it.
+4. Map `uname -m` to the asset's architecture token.
+5. Normalize both `--version` input and upstream tags to a bare semantic
+   version for receipts and comparisons.
+6. Resolve latest with `bis_github_latest_tag`, or implement a small provider-
+   specific function.
+7. Call `bis_skip_if_installed` before downloading.
+8. Download, safely extract, install, smoke-test, and write the receipt.
+9. Add the script and installed command mapping to `README.md`; if names differ,
+   update the mappings in `justfile`.
+10. Run `just test`, a pinned install into a temporary `--prefix`, and the same
+    command again to test idempotency.
 
-`git-delta.sh` is the cleanest reference for the canonical form.
+## Security boundaries
 
-## Version tag camp (pick one per script)
+Checksums fetched through the release provider establish file integrity but do
+not independently prove maintainer identity. Add signature or provenance
+verification when upstream provides a stable documented policy. Never execute
+an installer directly from a pipe, extract archives into the final prefix, or
+send `GITHUB_TOKEN` to a non-GitHub host.
 
-Upstream tags are usually `vX.Y.Z`; asset filenames differ:
+Temporary cleanup is restricted to paths made by `bis_make_temp_dir`. Do not
+weaken that guard or introduce broad recursive deletion.
 
-- **Strip** (fish, delta, zmx — filename uses `X.Y.Z`):
-  `version="${VERSION#v}"` — hint: `Expected format: '0.18.2' (no 'v' prefix).`
-- **Prepend** (gcm, gitea — filename uses `vX.Y.Z`):
-  `version="v${VERSION#v}"` — hint: `Expected format: 'v2.6.1' (with 'v' prefix).`
-  Use `${version#v}` inline wherever the bare form is needed.
+## Tests
 
-`${VAR#v}` is idempotent, so users can pass either form.
-
-## Version source
-
-- **GitHub (default):** `curl -fsSL https://api.github.com/repos/${REPO}/releases/latest | grep -oP '"tag_name":\s*"\K[^"]+'`. No `jq`.
-- **Gitea:** `https://gitea.com/api/v1/repos/${REPO}/releases?limit=1`, same grep.
-- **Tag list filter** (non-GitHub asset host): `/tags` + `grep -oP '"name":\s*"\Kv[0-9][^"]+' | head -1`.
-- **Channel-based** (no version API, e.g. neovim): skip lookup; default `TAG="nightly"`; accept `nightly|stable|vX.Y.Z`.
-
-## Arch tokens (common upstream conventions)
-
-| Convention         | x86_64                     | aarch64                         | Example        |
-|--------------------|----------------------------|---------------------------------|----------------|
-| Kernel-style       | `x86_64`                   | `aarch64` (sometimes `arm64`)   | fish, nvim, zmx |
-| Go-style           | `amd64`                    | `arm64`                         | gitea          |
-| .NET-style         | `x64`                      | `arm64`                         | gcm            |
-| Rust target triple | `x86_64-unknown-linux-gnu` | `aarch64-unknown-linux-gnu`     | delta          |
-
-## OS detection
-
-Linux-only scripts hardcode `linux` in the URL. Add `get_os()` (`Linux→linux`, `Darwin→macos`, else exit 1) **only** when the tool supports macOS (see `zmx.sh`).
-
-## Extraction → install (pick by upstream shape)
-
-- **Raw binary, no archive** → download to tmp, `install -m 755`. Ref: `gitea.sh`.
-- **tar with single binary at root** → `tar xf`, then `install -m 755 "$TMP_DIR/<tool>" "$INSTALL_DIR/<tool>"`. Ref: `fish.sh`, `zmx.sh`.
-- **tar with versioned top-level dir** → `tar xzf ... --strip-components=1`, then `install`. Ref: `git-delta.sh`.
-- **tar already laid out as install tree** → `tar -xzf ... -C "$INSTALL_DIR"` directly. Ref: `git-credential-manager.sh`.
-- **Multi-dir install** (`bin/` + `lib/` + `share/`) → change `INSTALL_DIR` default to `$HOME/.local` and `cp -rf "$TMP_DIR"/{bin,lib,share} "$INSTALL_DIR"/`. Smoke-test with `"$INSTALL_DIR/bin/<tool>" --version | head -1`. Ref: `neovim.sh`.
-
-## Uninstall hint
-
-`just uninstall` removes only `<prefix>/bin/<binary>`. If your script also writes
-outside that path (multi-dir installs, completions, man pages, etc.), add a
-header comment so the recipe can warn the user about stragglers:
-
-```bash
-# uninstall-note: also installs lib/<tool> and share/<tool> under the prefix
-```
-
-Ref: `neovim.sh`.
-
-## Checklist for a new script
-
-1. Gather upstream facts: repo, release source, tag style, asset filename template, archive shape, supported arches.
-2. Copy the closest reference script (see §Extraction list).
-3. Change: purpose comment, `REPO`, `get_arch()` tokens, asset URL template, version-tag camp + error hint, tool name in the `install` target / final echo / smoke-test.
-4. Verify:
-   ```bash
-   ./<tool>.sh                    # default latest → ~/.local/bin
-   ./<tool>.sh --version X.Y.Z    # pinned
-   ./<tool>.sh --system           # prompts for sudo, installs to /usr/local/bin
-   ```
-   Final line must print the installed version.
-
-## Deliberate non-goals
-
-Don't add without a reason: checksum/signature verification, "already installed" short-circuit, `--help` / `--dry-run` / `--install-dir=`, shell completions, man pages, PATH mutation, symlinks, `wget` fallback, proxy config, colored output, log levels.
+`tests/test.sh` must stay network-independent. CI and local tests cover syntax,
+the shared CLI contract, and ShellCheck when available. Release-specific asset
+tests are performed manually with pinned end-to-end installs because upstream
+asset layouts can change independently of this repository.

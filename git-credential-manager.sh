@@ -1,76 +1,55 @@
 #!/usr/bin/env bash
-# Install the latest git-credential-manager from GitHub releases into ~/.local/bin
+# Install Git Credential Manager from GitHub releases.
+# uninstall-note: also installs lib/git-credential-manager below the selected prefix
 set -euo pipefail
 
-INSTALL_DIR="$HOME/.local/bin"
-REPO="git-ecosystem/git-credential-manager"
-SUDO=""
-
-VERSION=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-  --system)
-    INSTALL_DIR="/usr/local/bin"
-    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
-    shift
-    ;;
-  --version)
-    VERSION="$2"
-    shift 2
-    ;;
-  *)
-    echo "Unknown option: $1" >&2
-    exit 1
-    ;;
-  esac
-done
+BIS_TOOL="git-credential-manager"
+BIS_DESCRIPTION="Install Git Credential Manager and its runtime libraries from a verified GitHub release."
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+bis_parse_args "$@"
 
 get_arch() {
   case "$(uname -m)" in
-  x86_64) echo "x64" ;;
-  aarch64) echo "arm64" ;;
-  *)
-    echo "Unsupported architecture: $(uname -m)" >&2
-    exit 1
-    ;;
+  x86_64) echo x64 ;;
+  aarch64 | arm64) echo arm64 ;;
+  *) bis_die "unsupported architecture: $(uname -m)" ;;
   esac
 }
 
-TMP_DIR=""
-cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
-trap cleanup EXIT
-
 main() {
-  local arch version download_url
-
+  local repo="git-ecosystem/git-credential-manager" arch version tag asset archive binary file runtime_dir
+  [[ "$(uname -s)" == Linux ]] || bis_die "only Linux is supported"
+  bis_require curl tar install
   arch=$(get_arch)
-
-  if [[ -n "$VERSION" ]]; then
-    version="v${VERSION#v}"
-    echo "Using specified version: $version"
+  if [[ -n "$BIS_VERSION" ]]; then
+    version=${BIS_VERSION#v}
+    tag="v${version}"
   else
-    echo "Fetching latest release info..."
-    version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
-      grep -oP '"tag_name":\s*"\K[^"]+')
-    echo "Latest version: $version"
+    tag=$(bis_github_latest_tag "$repo")
+    version=${tag#v}
   fi
+  binary="$BIS_PREFIX/bin/git-credential-manager"
+  bis_skip_if_installed "$binary" "$version" --version && return 0
 
-  download_url="https://github.com/${REPO}/releases/download/${version}/gcm-linux-${arch}-${version#v}.tar.gz"
-  echo "Downloading from: $download_url"
-
-  TMP_DIR=$(mktemp -d)
-  if ! curl -fsSL -o "$TMP_DIR/gcm.tar.gz" "$download_url"; then
-    echo "Error: failed to download version '${version}'." >&2
-    echo "Expected format: 'v2.6.1' (with 'v' prefix). See: https://github.com/${REPO}/releases" >&2
-    exit 1
-  fi
-
-  $SUDO mkdir -p "$INSTALL_DIR"
-  $SUDO tar -xzf "$TMP_DIR/gcm.tar.gz" -C "$INSTALL_DIR"
-
-  echo "git-credential-manager installed to ${INSTALL_DIR}"
-  "$INSTALL_DIR/git-credential-manager" --version
+  bis_make_temp_dir
+  asset="gcm-linux-${arch}-${version}.tar.gz"
+  archive="$BIS_TMP_DIR/$asset"
+  bis_download_github_asset "$repo" "$tag" "$asset" "$archive"
+  ((BIS_DRY_RUN)) && return 0
+  bis_safe_extract_tar "$archive" "$BIS_TMP_DIR/extracted"
+  runtime_dir="$BIS_PREFIX/lib/git-credential-manager"
+  for file in "$BIS_TMP_DIR"/extracted/*; do
+    [[ -f "$file" ]] || continue
+    if [[ "${file##*/}" == git-credential-manager ]]; then
+      bis_install_file "$file" "$runtime_dir/${file##*/}" 755
+    else
+      bis_install_file "$file" "$runtime_dir/${file##*/}" 644
+    fi
+  done
+  bis_run_privileged mkdir -p "$BIS_PREFIX/bin"
+  bis_run_privileged ln -sfn ../lib/git-credential-manager/git-credential-manager "$binary"
+  "$binary" --version
+  bis_mark_installed "$version"
 }
 
 main

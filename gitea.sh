@@ -1,78 +1,68 @@
 #!/usr/bin/env bash
-# Install the latest Gitea tea CLI from Gitea releases into ~/.local/bin
+# Install the Gitea tea CLI from checksummed release artifacts.
 set -euo pipefail
 
-INSTALL_DIR="$HOME/.local/bin"
-SUDO=""
-
-VERSION=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-  --system)
-    INSTALL_DIR="/usr/local/bin"
-    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
-    shift
-    ;;
-  --version)
-    VERSION="$2"
-    shift 2
-    ;;
-  *)
-    echo "Unknown option: $1" >&2
-    exit 1
-    ;;
-  esac
-done
+BIS_TOOL="tea"
+BIS_DESCRIPTION="Install Gitea's tea CLI and verify its published SHA-256 checksum."
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+bis_parse_args "$@"
 
 get_arch() {
   case "$(uname -m)" in
-  x86_64) echo "amd64" ;;
-  aarch64) echo "arm64" ;;
-  armv7l) echo "arm-7" ;;
-  armv6l) echo "arm-6" ;;
-  armv5l) echo "arm-5" ;;
-  *)
-    echo "Unsupported architecture: $(uname -m)" >&2
-    exit 1
-    ;;
+  x86_64) echo amd64 ;;
+  aarch64 | arm64) echo arm64 ;;
+  armv7l) echo arm-7 ;;
+  armv6l) echo arm-6 ;;
+  armv5l) echo arm-5 ;;
+  *) bis_die "unsupported architecture: $(uname -m)" ;;
   esac
 }
 
-TMP_DIR=""
-cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
-trap cleanup EXIT
+latest_tag() {
+  local json
+  bis_make_temp_dir
+  json="$BIS_TMP_DIR/tea-release.json"
+  bis_curl --output "$json" 'https://gitea.com/api/v1/repos/gitea/tea/releases?limit=1' ||
+    bis_die "could not resolve the latest tea release"
+  if command -v jq >/dev/null 2>&1; then
+    jq -er '.[0].tag_name' "$json"
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["tag_name"])' "$json"
+  else
+    sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$json" | head -n 1
+  fi
+}
 
 main() {
-  local arch version download_url
-
+  local arch version tag asset base archive checksum expected binary
+  [[ "$(uname -s)" == Linux ]] || bis_die "only Linux is supported"
+  bis_require curl xz install
   arch=$(get_arch)
-
-  if [[ -n "$VERSION" ]]; then
-    version="v${VERSION#v}"
-    echo "Using specified version: $version"
+  if [[ -n "$BIS_VERSION" ]]; then
+    version=${BIS_VERSION#v}
+    tag="v${version}"
   else
-    echo "Fetching latest release info..."
-    version=$(curl -fsSL "https://gitea.com/api/v1/repos/gitea/tea/releases?limit=1" |
-      grep -oP '"tag_name":\s*"\K[^"]+')
-    echo "Latest version: $version"
+    tag=$(latest_tag)
+    version=${tag#v}
   fi
+  binary="$BIS_PREFIX/bin/tea"
+  bis_skip_if_installed "$binary" "$version" --version && return 0
 
-  download_url="https://gitea.com/gitea/tea/releases/download/${version}/tea-${version#v}-linux-${arch}"
-  echo "Downloading from: $download_url"
-
-  TMP_DIR=$(mktemp -d)
-  if ! curl -fsSL -o "$TMP_DIR/tea" "$download_url"; then
-    echo "Error: failed to download version '${version}'." >&2
-    echo "Expected format: 'v0.9.0' (with 'v' prefix). See: https://gitea.com/gitea/tea/releases" >&2
-    exit 1
-  fi
-
-  $SUDO mkdir -p "$INSTALL_DIR"
-  $SUDO install -m 755 "$TMP_DIR/tea" "$INSTALL_DIR/tea"
-
-  echo "tea ${version} installed to ${INSTALL_DIR}/tea"
-  "$INSTALL_DIR/tea" --version
+  bis_make_temp_dir
+  asset="tea-${version}-linux-${arch}.xz"
+  base="https://gitea.com/gitea/tea/releases/download/${tag}"
+  archive="$BIS_TMP_DIR/$asset"
+  checksum="$BIS_TMP_DIR/$asset.sha256"
+  bis_download "$base/$asset" "$archive"
+  bis_download "$base/$asset.sha256" "$checksum"
+  ((BIS_DRY_RUN)) && return 0
+  expected=$(awk 'NR == 1 {print $1}' "$checksum")
+  [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] || bis_die "invalid checksum published for $asset"
+  bis_verify_sha256 "$archive" "$expected"
+  xz -dc "$archive" >"$BIS_TMP_DIR/tea"
+  bis_install_file "$BIS_TMP_DIR/tea" "$binary"
+  "$binary" --version
+  bis_mark_installed "$version"
 }
 
 main

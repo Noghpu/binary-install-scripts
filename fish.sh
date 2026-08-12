@@ -1,77 +1,44 @@
 #!/usr/bin/env bash
-# Install the latest fish shell from GitHub releases into ~/.local/bin
+# Install fish shell from GitHub releases.
 set -euo pipefail
 
-INSTALL_DIR="$HOME/.local/bin"
-REPO="fish-shell/fish-shell"
-SUDO=""
-
-VERSION=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-  --system)
-    INSTALL_DIR="/usr/local/bin"
-    if [[ $EUID -ne 0 ]]; then SUDO="sudo"; sudo -v; fi
-    shift
-    ;;
-  --version)
-    VERSION="$2"
-    shift 2
-    ;;
-  *)
-    echo "Unknown option: $1" >&2
-    exit 1
-    ;;
-  esac
-done
+BIS_TOOL="fish"
+BIS_DESCRIPTION="Install the standalone fish shell binary from a verified GitHub release."
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lib/common.sh"
+bis_parse_args "$@"
 
 get_arch() {
   case "$(uname -m)" in
-  x86_64) echo "x86_64" ;;
-  aarch64) echo "aarch64" ;;
-  *)
-    echo "Unsupported architecture: $(uname -m)" >&2
-    exit 1
-    ;;
+  x86_64) echo x86_64 ;;
+  aarch64 | arm64) echo aarch64 ;;
+  *) bis_die "unsupported architecture: $(uname -m)" ;;
   esac
 }
 
-TMP_DIR=""
-cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; }
-trap cleanup EXIT
-
 main() {
-  local arch version download_url
-
+  local repo="fish-shell/fish-shell" arch version tag asset archive binary
+  [[ "$(uname -s)" == Linux ]] || bis_die "only Linux is supported"
+  bis_require curl tar install
   arch=$(get_arch)
-
-  if [[ -n "$VERSION" ]]; then
-    version="${VERSION#v}"
-    echo "Using specified version: $version"
+  if [[ -n "$BIS_VERSION" ]]; then
+    version=${BIS_VERSION#v}
+    tag=$version
   else
-    echo "Fetching latest release info..."
-    version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" |
-      grep -oP '"tag_name":\s*"\K[^"]+')
-    echo "Latest version: $version"
+    tag=$(bis_github_latest_tag "$repo")
+    version=${tag#v}
   fi
+  binary="$BIS_PREFIX/bin/fish"
+  bis_skip_if_installed "$binary" "$version" --version && return 0
 
-  download_url="https://github.com/${REPO}/releases/download/${version}/fish-${version}-linux-${arch}.tar.xz"
-  echo "Downloading from: $download_url"
-
-  TMP_DIR=$(mktemp -d)
-  if ! curl -fsSL -o "$TMP_DIR/fish.tar.xz" "$download_url"; then
-    echo "Error: failed to download version '${version}'." >&2
-    echo "Expected format: '4.0.0' (no 'v' prefix). See: https://github.com/${REPO}/releases" >&2
-    exit 1
-  fi
-  tar xf "$TMP_DIR/fish.tar.xz" -C "$TMP_DIR"
-
-  $SUDO mkdir -p "$INSTALL_DIR"
-  $SUDO install -m 755 "$TMP_DIR/fish" "$INSTALL_DIR/fish"
-
-  echo "fish ${version} installed to ${INSTALL_DIR}/fish"
-  "$INSTALL_DIR/fish" --version
+  bis_make_temp_dir
+  asset="fish-${version}-linux-${arch}.tar.xz"
+  archive="$BIS_TMP_DIR/$asset"
+  bis_download_github_asset "$repo" "$tag" "$asset" "$archive"
+  ((BIS_DRY_RUN)) && return 0
+  bis_safe_extract_tar "$archive" "$BIS_TMP_DIR/extracted"
+  bis_install_file "$BIS_TMP_DIR/extracted/fish" "$binary"
+  "$binary" --version
+  bis_mark_installed "$version"
 }
 
 main
