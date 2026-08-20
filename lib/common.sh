@@ -259,11 +259,23 @@ bis_safe_extract_tar() {
   tar xf "$archive" -C "$destination"
 }
 
+bis_safe_extract_zip() {
+  local archive=$1 destination=$2
+  local member
+  while IFS= read -r member; do
+    case "$member" in
+    /* | ../* | */../* | */..) bis_die "unsafe archive member: $member" ;;
+    esac
+  done < <(unzip -Z1 "$archive")
+  mkdir -p "$destination"
+  unzip -q -o "$archive" -d "$destination"
+}
+
 bis_installed_version() {
   local binary=$1
   shift
   [[ -x "$binary" ]] || return 1
-  "$binary" "$@" 2>&1 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+)?' | head -n 1
+  "$binary" "$@" 2>&1 | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.]+(-[0-9A-Za-z.]+)*)?' | head -n 1
 }
 
 bis_skip_if_installed() {
@@ -285,12 +297,17 @@ bis_skip_if_installed() {
 }
 
 bis_mark_installed() {
-  local version=$1 receipt source
+  local version=$1 receipt receipt_dir source
   ((BIS_DRY_RUN)) && return 0
   bis_make_temp_dir
   source="$BIS_TMP_DIR/${BIS_TOOL}.version"
   printf '%s\n' "$version" >"$source"
-  receipt="$BIS_PREFIX/share/binary-install-scripts/${BIS_TOOL}.version"
+  receipt_dir="$BIS_PREFIX/share/binary-install-scripts"
+  receipt="$receipt_dir/${BIS_TOOL}.version"
+  # This directory holds nothing but receipts, so its mode is ours to set. A
+  # --system install creates it through sudo, and a root umask of 077 would
+  # otherwise leave it unreadable to the user whose next run wants to read it.
+  bis_run_privileged install -d -m 755 "$receipt_dir"
   bis_install_file "$source" "$receipt" 644
 }
 

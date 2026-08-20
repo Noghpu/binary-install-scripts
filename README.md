@@ -44,8 +44,15 @@ when an upstream project publishes a stable, automatable policy for it.
 | `gitea.sh` | `tea` | Linux x86-64/ARM variants |
 | `go-grip.sh` | `go-grip` | Linux x86-64/ARM64 |
 | `jj.sh` | `jj` | Linux x86-64/ARM64 |
+| `kanata.sh` | `kanata` | Linux x86-64 |
 | `neovim.sh` | `nvim` | Linux x86-64/ARM64 |
 | `zmx.sh` | `zmx` | Linux/macOS x86-64/ARM64 |
+
+`kanata.sh` installs the default build. The release archive also contains a
+`cmd_allowed` build whose `cmd` action runs arbitrary programs named in the
+keyboard configuration; that one is deliberately not installed. Upstream
+publishes prerelease tags, so `--version 1.12.1-prerelease-1` is valid and
+`--version` with no prerelease suffix resolves to the latest stable release.
 
 `neovim.sh` defaults to the moving `nightly` channel. Use `--version stable`
 for the moving stable channel or a semantic version for an idempotent pin.
